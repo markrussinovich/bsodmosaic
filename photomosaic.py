@@ -135,9 +135,8 @@ def find_best_tile(target_color, tiles):
 
 def assign_tiles_ensure_all_used(target_colors, tiles):
     """
-    Assign tiles to positions ensuring every tile is used at least once,
-    and no tile is used more than MAX_REUSE times for diversity.
-    Spreads similar colors across each quadrant to avoid clustering.
+    Assign tiles to positions with even distribution across all quadrants.
+    No color matching - just spread all tiles evenly for visual variety.
     """
     import random
     random.seed(42)  # Reproducible results
@@ -158,13 +157,9 @@ def assign_tiles_ensure_all_used(target_colors, tiles):
     print(f"  Assigning {num_tiles} tiles to {num_positions} positions")
     print(f"  Max reuse per tile: {max_reuse}")
     
-    # Group positions by quadrant based on their location in the image
-    # The logo is divided into 4 quadrants with a gap in the middle
+    # Group positions by quadrant based on their location
     def get_quadrant_by_position(row, col, grid_size):
-        margin = int(grid_size * 0.12)
         gap_center = grid_size // 2
-        
-        # Determine which quadrant based on row/col position
         if row < gap_center and col < gap_center:
             return 'red'      # Top-left
         elif row < gap_center and col >= gap_center:
@@ -185,7 +180,7 @@ def assign_tiles_ensure_all_used(target_colors, tiles):
         q = get_quadrant_by_position(r, c, grid_size)
         quadrant_positions[q].append((r, c, color))
     
-    # For each quadrant, shuffle positions for random placement
+    # Shuffle positions within each quadrant
     for q in quadrant_positions:
         random.shuffle(quadrant_positions[q])
     
@@ -193,58 +188,38 @@ def assign_tiles_ensure_all_used(target_colors, tiles):
           f"green={len(quadrant_positions['green'])}, blue={len(quadrant_positions['blue'])}, "
           f"yellow={len(quadrant_positions['yellow'])}")
     
-    # Calculate how well each tile matches each quadrant
-    def quadrant_match_score(tile_color, quadrant):
-        base_colors = {
-            'red': WINDOWS_COLORS['red'],
-            'green': WINDOWS_COLORS['green'],
-            'blue': WINDOWS_COLORS['blue'],
-            'yellow': WINDOWS_COLORS['yellow'],
-        }
-        return color_distance(tile_color, base_colors[quadrant])
+    # Shuffle all tiles randomly
+    tile_indices = list(range(num_tiles))
+    random.shuffle(tile_indices)
     
-    # Score each tile for each quadrant
-    tile_scores = []
-    for tile_idx, tile in enumerate(tiles):
-        scores = {q: quadrant_match_score(tile['color'], q) for q in quadrant_positions}
-        best_quadrant = min(scores, key=scores.get)
-        tile_scores.append((scores[best_quadrant], tile_idx, best_quadrant, scores))
-    
-    # Sort tiles by their best match score
-    tile_scores.sort()
-    
-    # Assign tiles to quadrants
-    tile_usage = {i: 0 for i in range(num_tiles)}
+    # Distribute tiles evenly across quadrants (round-robin style)
     quadrant_tiles = {'red': [], 'green': [], 'blue': [], 'yellow': []}
-    tiles_assigned = set()
+    quadrant_order = ['red', 'green', 'blue', 'yellow']
+    tile_usage = {i: 0 for i in range(num_tiles)}
     
-    # First pass: assign each tile to its best quadrant (if space available)
-    for _, tile_idx, best_q, scores in tile_scores:
-        if tile_idx in tiles_assigned:
-            continue
-        
-        # Try best quadrant first, then others in order of match quality
-        sorted_quads = sorted(scores.keys(), key=lambda q: scores[q])
-        for q in sorted_quads:
+    # First pass: assign each tile once, distributing evenly across quadrants
+    tile_idx_iter = 0
+    for tile_idx in tile_indices:
+        # Find next quadrant that has room
+        for _ in range(4):
+            q = quadrant_order[tile_idx_iter % 4]
+            tile_idx_iter += 1
             if len(quadrant_tiles[q]) < len(quadrant_positions[q]):
                 quadrant_tiles[q].append(tile_idx)
-                tiles_assigned.add(tile_idx)
                 tile_usage[tile_idx] += 1
                 break
     
-    print(f"  First pass: {len(tiles_assigned)} tiles distributed to quadrants")
+    tiles_assigned = sum(len(v) for v in quadrant_tiles.values())
+    print(f"  First pass: {tiles_assigned} tiles distributed evenly")
     
-    # Second pass: fill remaining slots with reuse
-    for q in quadrant_positions:
+    # Second pass: fill remaining slots with reused tiles (round-robin)
+    for q in quadrant_order:
         slots_remaining = len(quadrant_positions[q]) - len(quadrant_tiles[q])
         if slots_remaining > 0:
-            # Get tiles sorted by match to this quadrant
-            available = [(quadrant_match_score(tiles[i]['color'], q), i) 
-                        for i in range(num_tiles) if tile_usage[i] < max_reuse]
-            available.sort()
-            
-            # Shuffle tiles with similar scores to spread them out
-            for score, tile_idx in available:
+            # Use tiles that haven't hit max_reuse yet, in shuffled order
+            available = [i for i in tile_indices if tile_usage[i] < max_reuse]
+            random.shuffle(available)
+            for tile_idx in available:
                 if slots_remaining <= 0:
                     break
                 if tile_usage[tile_idx] < max_reuse:
@@ -252,11 +227,11 @@ def assign_tiles_ensure_all_used(target_colors, tiles):
                     tile_usage[tile_idx] += 1
                     slots_remaining -= 1
     
-    # Shuffle tiles within each quadrant for even distribution
+    # Shuffle tiles within each quadrant for random placement
     for q in quadrant_tiles:
         random.shuffle(quadrant_tiles[q])
     
-    # Create final assignments by pairing shuffled tiles with shuffled positions
+    # Create final assignments
     assignments = {}
     for q in quadrant_positions:
         for i, (r, c, _) in enumerate(quadrant_positions[q]):
